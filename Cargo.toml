@@ -1,0 +1,10 @@
+[package]
+name = "Rust_discord_bot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serenity = "0.12.4"
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
+chrono = "0.4.42"
+poise = "0.6.1"
