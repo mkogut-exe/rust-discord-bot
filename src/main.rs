@@ -359,13 +359,13 @@ async fn get_time(ctx: Context<'_>, timezone_name:Option<String>
             return Ok(());
         }
     };
-    let datetime_utc: DateTime<Utc> = Utc::now();
-    let datetime_tz = datetime_utc.with_timezone(&timezone);
-
-    let content = format!("Current Time at {} ({}) is: {}",
-                              timezone_name,
-                              metric_clock::get_utc_offset(&timezone),
-                              datetime_utc.format("%H:%M").to_string());
+    let mut time_now = Utc::now().with_timezone(&timezone);
+    let mut time_now = Utc::now().with_timezone(&timezone);
+    let content = format!("\nCurrent Time in {} ({}) is: {} {}",
+                          timezone_name,
+                          metric_clock::get_utc_offset(&timezone),
+                          time_now.format("%H:%M").to_string(),
+                          timezone.offset_from_utc_datetime(&Utc::now().naive_utc()));
     ctx.say(content).await?;
     Ok(())
 }
