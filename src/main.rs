@@ -4,7 +4,10 @@ use tokio::time::sleep;
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use tokio::sync::Mutex;
-
+use std::fmt::Display;
+use std::fs::File;
+use chrono_tz::{Tz};
+use chrono::{DateTime, TimeZone, Utc, Offset};
 use poise::serenity_prelude as serenity;
 
 pub struct EditMessage { /* private fields */ }
@@ -13,7 +16,9 @@ mod metric_clock;
 
 struct Data {
     ping_check_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    metric_clock_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>
+    clock_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    metric_clock_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    timezone_clock_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -132,7 +137,7 @@ async fn metric_time(ctx: Context<'_>, utc_offset:Option<i32>
 }
 
 /// Command using role IDs
-#[poise::command(prefix_command, slash_command)]
+#[poise::command(prefix_command)]
 async fn secure_command(ctx: Context<'_>) -> Result<(), Error> {
     let allowed_roles_ids = vec![
         1429573519183843538 // Admin role ID
@@ -163,7 +168,7 @@ async fn metric_clock(
     let timezone = utc_offset * 3600;
 
     let metric_time_now = metric_clock::get_metric_h_m_string(utc_offset);
-    let initial_message = ctx.say(format!("🕒 Current Metric Time at UTC{} is: {}", utc_offset_string, metric_time_now)).await?;
+    let initial_message = ctx.say(format!("Current Metric Time at UTC{} is: {}", utc_offset_string, metric_time_now)).await?;
     let message = initial_message.message().await?;
 
     let ctx_clone = ctx.serenity_context().clone();
@@ -205,7 +210,7 @@ async fn metric_clock(
                     hour_str = format!("0{}", current_metric_hour);
                 }
                 last_metric_second = current_metric_second;
-                let new_content = format!("🕒 Current Metric Time at UTC{} is: {}:{}", utc_offset_string_cloned, hour_str, minute_str);
+                let new_content = format!("Current Metric Time at UTC{} is: {}:{}", utc_offset_string_cloned, hour_str, minute_str);
 
                 if let Ok(mut message) = channel_id.message(&ctx_clone, message_id).await {
                     let builder = serenity::EditMessage::new().content(new_content);
@@ -233,7 +238,6 @@ async fn metric_clock(
 
     Ok(())
 }
-
 /// Stop the live metric clock
 #[poise::command(prefix_command, slash_command)]
 async fn stop_metric_clock(ctx: Context<'_>) -> Result<(), Error> {
@@ -245,6 +249,226 @@ async fn stop_metric_clock(ctx: Context<'_>) -> Result<(), Error> {
         println!("Stopped metric clock.");
     } else {
         ctx.say("No metric clock is running.").await?;
+    }
+    Ok(())
+}
+
+/// Live clock that updates every minute for each timezone
+#[poise::command(prefix_command, slash_command)]
+async fn clock(
+    ctx: Context<'_>, timezone_name: Option<String>
+) -> Result<(), Error> {
+    let timezone_name = timezone_name.unwrap_or("Europe/Berlin".to_string());
+
+    // Parse the timezone name
+    let timezone: Tz = match timezone_name.parse() {
+        Ok(tz) => tz,
+        Err(_) => {
+            ctx.say("Please provide a valid IANA timezone name (e.g., 'Europe/London', 'America/New_York', 'Asia/Tokyo').").await?;
+            return Ok(());
+        }
+    };
+
+    let mut time_now = Utc::now().with_timezone(&timezone);
+    let content = format!("Current Time at {} ({}) is: {}",
+                              timezone_name,
+                              metric_clock::get_utc_offset(&timezone),
+                              time_now.format("%H:%M").to_string());
+    let initial_message = ctx.say(content).await?;
+    let message = initial_message.message().await?;
+
+    let ctx_clone = ctx.serenity_context().clone();
+    let channel_id = message.channel_id;
+    let message_id = message.id;
+
+    // Prevent multiple concurrent metric clock tasks
+    let handle_arc = ctx.data().clock_handle.clone();
+    {
+        let guard = handle_arc.lock().await;
+        if guard.is_some() {
+            ctx.say("clock is already running.").await?;
+            return Ok(());
+        }
+    }
+
+    let handle = tokio::spawn(async move {
+        let mut last_discord_update = std::time::Instant::now();
+
+        loop {
+            let cycle_start = std::time::Instant::now();
+
+            // Only update Discord every minute
+            if last_discord_update.elapsed() >= Duration::from_secs(15) {
+                time_now = Utc::now().with_timezone(&timezone);
+
+                let new_content = format!("Current Time at {} ({}) is: {}",
+                                          timezone_name,
+                                          metric_clock::get_utc_offset(&timezone),
+                                          time_now.format("%H:%M").to_string());
+
+                if let Ok(mut message) = channel_id.message(&ctx_clone, message_id).await {
+                    let builder = serenity::EditMessage::new().content(new_content);
+                    message.edit(&ctx_clone, builder).await.ok();
+                }
+
+                last_discord_update = std::time::Instant::now();
+            }
+
+
+            let cycle_time = cycle_start.elapsed();
+            if cycle_time < Duration::from_secs(15) {
+                sleep(Duration::from_secs(15) - cycle_time).await;
+            }
+        }
+    });
+
+    // store handle
+    let mut guard = handle_arc.lock().await;
+    println!("Started metric clock task.");
+    *guard = Some(handle);
+    Ok(())
+}
+
+/// Stop the live clock
+#[poise::command(prefix_command, slash_command)]
+async fn stop_clock(ctx: Context<'_>) -> Result<(), Error> {
+    let clock_handle_arc = ctx.data().clock_handle.clone();
+    let mut guard = clock_handle_arc.lock().await;
+    if let Some(handle) = guard.take() {
+        handle.abort();
+        ctx.say("Stopped clock.").await?;
+        println!("Stopped clock.");
+    } else {
+        ctx.say("No clock is running.").await?;
+    }
+    Ok(())
+}
+
+/// Shows current time in a given time zone (e.g., "Europe/Berlin", "America/New_York")
+#[poise::command(prefix_command, slash_command)]
+async fn get_time(ctx: Context<'_>, timezone_name:Option<String>
+) -> Result<(), Error> {
+    let timezone_name = timezone_name.unwrap_or("Europe/Berlin".to_string());
+
+    let timezone: Tz = match timezone_name.parse() {
+        Ok(tz) => tz,
+        Err(_) => {
+            ctx.say("Please provide a valid IANA timezone name (e.g., 'Europe/London', 'America/New_York', 'Asia/Tokyo').").await?;
+            return Ok(());
+        }
+    };
+    let datetime_utc: DateTime<Utc> = Utc::now();
+    let datetime_tz = datetime_utc.with_timezone(&timezone);
+
+    let content = format!("Current Time at {} ({}) is: {}",
+                              timezone_name,
+                              metric_clock::get_utc_offset(&timezone),
+                              datetime_utc.format("%H:%M").to_string());
+    ctx.say(content).await?;
+    Ok(())
+}
+
+
+/// Live clock that for each timezone in list (format: Europe/Berlin,America/New_York,...)
+#[poise::command(prefix_command, slash_command)]
+async fn timezone_clock(
+    ctx: Context<'_>, timezone_name_list: Option<String>
+) -> Result<(), Error> {
+    let timezone_names = timezone_name_list.unwrap_or("Europe/Berlin".to_string());
+    let timezone_vec: Vec<String> = timezone_names.split(',').map(|s| s.trim().to_string()).collect();
+    let mut content = "Current Time at timezones:".to_string();
+
+    for timezone_name_str in timezone_vec.clone() {
+        // Parse the timezone name
+        let timezone: Tz = match timezone_name_str.parse() {
+            Ok(tz) => tz,
+            Err(_) => {
+                ctx.say("Please provide a valid IANA timezone name (e.g., 'Europe/London', 'America/New_York', 'Asia/Tokyo').").await?;
+                return Ok(());
+            }
+        };
+        let mut time_now = Utc::now().with_timezone(&timezone);
+        content = content + &format!("\n🕑 {} ({}) is: {} {}",
+                                     timezone_name_str,
+                                     metric_clock::get_utc_offset(&timezone),
+                                     time_now.format("%H:%M").to_string(),
+                                     timezone.offset_from_utc_datetime(&Utc::now().naive_utc()));
+    }
+
+
+
+    let initial_message = ctx.say(content).await?;
+    let message = initial_message.message().await?;
+
+    let ctx_clone = ctx.serenity_context().clone();
+    let channel_id = message.channel_id;
+    let message_id = message.id;
+
+    // Prevent multiple concurrent metric clock tasks
+    let timezoned_handle_arc = ctx.data().timezone_clock_handle.clone();
+    {
+        let guard = timezoned_handle_arc.lock().await;
+        if guard.is_some() {
+            ctx.say("clock is already running.").await?;
+            return Ok(());
+        }
+    }
+
+    let handle = tokio::spawn(async move {
+        let mut last_discord_update = std::time::Instant::now();
+
+        loop {
+            let cycle_start = std::time::Instant::now();
+
+            // Only update Discord every minute
+            if last_discord_update.elapsed() >= Duration::from_secs(15) {
+                let mut new_content = "Current Time at timezones:".to_string();
+
+                for timezone_name_str in timezone_vec.clone(){
+                    // Parse the timezone name
+                    let timezone: Tz = timezone_name_str.parse().unwrap();
+                    let mut time_now = Utc::now().with_timezone(&timezone);
+                    new_content = new_content + &format!("\n🕑 {} ({}) is: {} {}",
+                                                 timezone_name_str,
+                                                 metric_clock::get_utc_offset(&timezone),
+                                                 time_now.format("%H:%M").to_string(),
+                                                 timezone.offset_from_utc_datetime(&Utc::now().naive_utc()));
+                }
+
+                if let Ok(mut message) = channel_id.message(&ctx_clone, message_id).await {
+                    let builder = serenity::EditMessage::new().content(new_content);
+                    message.edit(&ctx_clone, builder).await.ok();
+                }
+
+                last_discord_update = std::time::Instant::now();
+            }
+
+
+            let cycle_time = cycle_start.elapsed();
+            if cycle_time < Duration::from_secs(15) {
+                sleep(Duration::from_secs(15) - cycle_time).await;
+            }
+        }
+    });
+
+    // store handle
+    let mut guard = timezoned_handle_arc.lock().await;
+    println!("Started timezoned clock task.");
+    *guard = Some(handle);
+    Ok(())
+}
+
+/// Stop the live clock
+#[poise::command(prefix_command, slash_command)]
+async fn stop_timezone_clock(ctx: Context<'_>) -> Result<(), Error> {
+    let timezoned_handle_arc = ctx.data().timezone_clock_handle.clone();
+    let mut guard = timezoned_handle_arc.lock().await;
+    if let Some(handle) = guard.take() {
+        handle.abort();
+        ctx.say("Stopped clock.").await?;
+        println!("Stopped clock.");
+    } else {
+        ctx.say("No clock is running.").await?;
     }
     Ok(())
 }
@@ -309,6 +533,11 @@ async fn main() {
                 check_connection(),
                 stop_check_connection(),
                 sync_slash(),
+                clock(),
+                stop_clock(),
+                get_time(),
+                timezone_clock(),
+                stop_timezone_clock(),
             ], // Add your commands to this vector.
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -326,7 +555,9 @@ async fn main() {
                 }
                 Ok(Data {
                     ping_check_handle: Arc::new(Mutex::new(None)),
+                    clock_handle: Arc::new(Mutex::new(None)),
                     metric_clock_handle: Arc::new(Mutex::new(None)),
+                    timezone_clock_handle: Arc::new(Mutex::new(None))
                 })
             })
         })
@@ -339,4 +570,3 @@ async fn main() {
         .await;
     client.unwrap().start().await.unwrap();
 }
-

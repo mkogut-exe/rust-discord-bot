@@ -1,6 +1,7 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use chrono::Local;
+use chrono::{Local, Utc, TimeZone, Offset};
+use chrono_tz::Tz;
 
 pub fn metric_clock(utc_timezone: i32) {
     let mut last_metric_second = 0;
@@ -108,4 +109,12 @@ pub fn get_metric_minutes(timezone: &i32) -> u64 {
 pub fn get_metric_hours(timezone: &i32) -> u64 {
     let metric_timestamp = get_metric_todaystamp(timezone);
     metric_timestamp / 10000
+}
+pub fn get_utc_offset(tz: &Tz) -> String {
+    let time_in_tz = Utc::now().with_timezone(tz);
+    let offset_seconds = time_in_tz.offset().fix().local_minus_utc();
+    let offset_hours = offset_seconds as f64 / 3600.0;
+
+    let sign = if offset_hours >= 0.0 { '+' } else { '-' };
+    format!("UTC{}{}", sign, offset_hours.abs())
 }
