@@ -9,6 +9,8 @@ use std::fs::File;
 use chrono_tz::{Tz};
 use chrono::{DateTime, TimeZone, Utc, Offset};
 use poise::serenity_prelude as serenity;
+use shuttle_runtime::SecretStore;
+use shuttle_serenity::ShuttleSerenity;
 
 pub struct EditMessage { /* private fields */ }
 
@@ -511,10 +513,13 @@ fn get_token() -> String {
 }
 
 
-#[tokio::main]
-async fn main() {
-    // bot token from file
-    let token = get_token();
+#[shuttle_runtime::main]
+async fn main(
+    #[shuttle_runtime::Secrets] secrets: SecretStore,
+) -> ShuttleSerenity {
+    // Get bot token from shuttle secrets instead of file
+    let token = secrets.get("DISCORD_TOKEN")
+        .expect("'DISCORD_TOKEN' was not found in secrets");
 
     // permissions the bot will request
     let intents = serenity::GatewayIntents::GUILD_MESSAGES |
@@ -567,6 +572,7 @@ async fn main() {
 
     let client = serenity::ClientBuilder::new(token, intents)
         .framework(framework)
-        .await;
-    client.unwrap().start().await.unwrap();
+        .await
+        .expect("Error creating client");
+    Ok(client.into())
 }
