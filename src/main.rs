@@ -32,7 +32,6 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 ///ping to get latency
 #[poise::command(
     prefix_command,
-    slash_command
 )]
 async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let ping = ctx.ping().await;
@@ -40,10 +39,9 @@ async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-///checks ping every x seconds by editing the same message
+///checks ping every x seconds by editing the same message (user ping only if hosted locally)
 #[poise::command(
     prefix_command,
-    slash_command
 )]
 async fn check_connection(ctx: Context<'_>,check_freq:Option<u64>,
                           user_to_ping:Option<String>,
@@ -105,7 +103,7 @@ async fn check_connection(ctx: Context<'_>,check_freq:Option<u64>,
     Ok(())
 }
 ///Stop checking connection
-#[poise::command(prefix_command, slash_command)]
+#[poise::command(prefix_command)]
 async fn stop_check_connection(ctx: Context<'_>) -> Result<(), Error> {
     let ping_check_handle_arc = ctx.data().ping_check_handle.clone();
     let mut guard = ping_check_handle_arc.lock().await;
@@ -124,10 +122,10 @@ async fn stop_check_connection(ctx: Context<'_>) -> Result<(), Error> {
     prefix_command,
     slash_command
 )]
-/// Shows current time in metric (decimal) format (UTC+2 by default, specify offset in hours)
+/// Shows current time in metric (decimal) format (UTC+1 by default, to change specify offset in hours)
 async fn metric_time(ctx: Context<'_>, utc_offset:Option<i32>
 ) -> Result<(), Error> {
-    let utc_offset = utc_offset.unwrap_or(2);
+    let utc_offset = utc_offset.unwrap_or(1);
     let mut utc_offset_string = format!("+{}", utc_offset);
     if utc_offset<0{
         utc_offset_string = format!("-{}", utc_offset);
@@ -153,12 +151,12 @@ async fn secure_command(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Live metric (decimal) clock that updates every metric minute
+/// Live metric (decimal) clock that updates every metric minute (UTC+1 by default)
 #[poise::command(prefix_command, slash_command)]
 async fn metric_clock(
     ctx: Context<'_>, utc_offset: Option<i32>
 ) -> Result<(), Error> {
-    let utc_offset = utc_offset.unwrap_or(2);
+    let utc_offset = utc_offset.unwrap_or(1);
     if utc_offset < -12 || utc_offset > 14 {
         ctx.say("Please provide a valid UTC offset between -12 and +14.").await?;
         return Ok(());
@@ -255,7 +253,7 @@ async fn stop_metric_clock(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Live clock that updates every minute for each timezone
+///Live clock for a given timezone ((IANA format e.g., "Europe/Berlin", "America/New_York")
 #[poise::command(prefix_command, slash_command)]
 async fn clock(
     ctx: Context<'_>, timezone_name: Option<String>
@@ -346,7 +344,7 @@ async fn stop_clock(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Shows current time in a given time zone (e.g., "Europe/Berlin", "America/New_York")
+/// Shows current time in a given time zone (IANA format e.g., "Europe/Berlin", "America/New_York")
 #[poise::command(prefix_command, slash_command)]
 async fn get_time(ctx: Context<'_>, timezone_name:Option<String>
 ) -> Result<(), Error> {
