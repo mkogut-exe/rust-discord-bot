@@ -203,10 +203,10 @@ async fn metric_clock(
                 let mut minute_str = current_metric_minute.to_string();
                 let mut hour_str = current_metric_hour.to_string();
 
-                if current_metric_minute < 9 {
+                if current_metric_minute <= 9 {
                     minute_str = format!("0{}", current_metric_minute);
                 }
-                if current_metric_hour < 9 {
+                if current_metric_hour <= 9 {
                     hour_str = format!("0{}", current_metric_hour);
                 }
                 last_metric_second = current_metric_second;
