@@ -9,8 +9,6 @@ use std::fs::File;
 use chrono_tz::{Tz};
 use chrono::{DateTime, TimeZone, Utc, Offset};
 use poise::serenity_prelude as serenity;
-use shuttle_runtime::SecretStore;
-use shuttle_serenity::ShuttleSerenity;
 
 pub struct EditMessage { /* private fields */ }
 
@@ -368,15 +366,15 @@ async fn get_time(ctx: Context<'_>, timezone_name:Option<String>
     Ok(())
 }
 
-
 /// Live clock that for each timezone in list (format: Europe/Berlin,America/New_York,...)
 #[poise::command(prefix_command, slash_command)]
 async fn timezone_clock(
-    ctx: Context<'_>, timezone_name_list: Option<String>
+    ctx: Context<'_>, timezone_name_list: Option<String>,restart_msg_id: Option<String>,
 ) -> Result<(), Error> {
     let timezone_names = timezone_name_list.unwrap_or("Europe/Berlin".to_string());
     let timezone_vec: Vec<String> = timezone_names.split(',').map(|s| s.trim().to_string()).collect();
     let mut content = "Current Time at timezones:".to_string();
+    let msg_id = restart_msg_id.unwrap_or("".to_string());
 
     for timezone_name_str in timezone_vec.clone() {
         // Parse the timezone name
@@ -511,18 +509,15 @@ fn get_token() -> String {
 }
 
 
-#[shuttle_runtime::main]
-async fn main(
-    #[shuttle_runtime::Secrets] secrets: SecretStore,
-) -> ShuttleSerenity {
-    // Get bot token from shuttle secrets instead of file
-    let token = secrets.get("DISCORD_TOKEN")
-        .expect("'DISCORD_TOKEN' was not found in secrets");
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    // Read bot token locally from BOT_TOKEN.txt
+    let token = get_token().trim().to_string();
 
     // permissions the bot will request
-    let intents = serenity::GatewayIntents::GUILD_MESSAGES |
-        serenity::GatewayIntents::MESSAGE_CONTENT |
-        serenity::GatewayIntents::non_privileged();
+    let intents = serenity::GatewayIntents::GUILD_MESSAGES
+        | serenity::GatewayIntents::MESSAGE_CONTENT
+        | serenity::GatewayIntents::non_privileged();
 
     println!("Loading bot...");
     let framework = poise::Framework::builder()
@@ -541,7 +536,7 @@ async fn main(
                 get_time(),
                 timezone_clock(),
                 stop_timezone_clock(),
-            ], // Add your commands to this vector.
+            ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
                 case_insensitive_commands: false,
@@ -551,7 +546,6 @@ async fn main(
         })
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
-                // This registers your application commands globally, making slash commands available.
                 match poise::builtins::register_globally(ctx, &framework.options().commands).await {
                     Ok(_) => println!("✅ Successfully registered slash commands, ready to go!"),
                     Err(e) => println!("❌ Failed to register commands: {}", e),
@@ -560,17 +554,19 @@ async fn main(
                     ping_check_handle: Arc::new(Mutex::new(None)),
                     clock_handle: Arc::new(Mutex::new(None)),
                     metric_clock_handle: Arc::new(Mutex::new(None)),
-                    timezone_clock_handle: Arc::new(Mutex::new(None))
+                    timezone_clock_handle: Arc::new(Mutex::new(None)),
                 })
             })
         })
         .build();
-
     // Create a new instance of the Client, logging in as a bot.
 
-    let client = serenity::ClientBuilder::new(token, intents)
+    let mut client = serenity::ClientBuilder::new(token, intents)
         .framework(framework)
         .await
         .expect("Error creating client");
-    Ok(client.into())
+
+    // Start the client locally
+    client.start().await.map_err(|e| Box::new(e) as Error)?;
+    Ok(())
 }
