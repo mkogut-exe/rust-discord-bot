@@ -11,7 +11,7 @@ COPY . .
 
 # Build and install the application
 # This compiles the binary and moves it to /usr/local/cargo/bin/
-RUN cargo install --path .
+RUN cargo install --path . --jobs 1
 
 # ---------------------------------------------------
 # 2. Runtime Stage

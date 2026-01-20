@@ -1,4 +1,5 @@
 use std::fs;
+use std::env;
 use std::time::Duration;
 use tokio::time::sleep;
 use std::sync::Arc;
@@ -512,8 +513,10 @@ fn get_token() -> String {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // Read bot token locally from BOT_TOKEN.txt
-    let token = get_token().trim().to_string();
-
+    //let token = get_token().trim().to_string();
+    let token = env::var("DISCORD_TOKEN")
+        .or_else(|_| fs::read_to_string("BOT_TOKEN.txt"))
+        .expect("Could not find DISCORD_TOKEN env var or BOT_TOKEN.txt file");
     // permissions the bot will request
     let intents = serenity::GatewayIntents::GUILD_MESSAGES
         | serenity::GatewayIntents::MESSAGE_CONTENT
