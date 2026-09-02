@@ -21,7 +21,7 @@ Features / Commands
 
 - `metric_time`
   - Usage: `!metric_time [utc_offset]`
-  - Shows the current metric (decimal) time. Defaults to UTC+2 if no offset is provided.
+  - Shows the current metric (decimal) time. Defaults to UTC+1 if no offset is provided.
 
 - `metric_clock` / `stop_metric_clock`
   - Usage: `!metric_clock [utc_offset]` and `!stop_metric_clock`
