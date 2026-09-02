@@ -1,4 +1,5 @@
 use std::fs;
+use std::env;
 use std::time::Duration;
 use tokio::time::sleep;
 use std::sync::Arc;
@@ -30,7 +31,6 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 ///ping to get latency
 #[poise::command(
     prefix_command,
-    slash_command
 )]
 async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let ping = ctx.ping().await;
@@ -38,10 +38,9 @@ async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-///checks ping every x seconds by editing the same message
+///checks ping every x seconds by editing the same message (user ping only if hosted locally)
 #[poise::command(
     prefix_command,
-    slash_command
 )]
 async fn check_connection(ctx: Context<'_>,check_freq:Option<u64>,
                           user_to_ping:Option<String>,
@@ -103,7 +102,7 @@ async fn check_connection(ctx: Context<'_>,check_freq:Option<u64>,
     Ok(())
 }
 ///Stop checking connection
-#[poise::command(prefix_command, slash_command)]
+#[poise::command(prefix_command)]
 async fn stop_check_connection(ctx: Context<'_>) -> Result<(), Error> {
     let ping_check_handle_arc = ctx.data().ping_check_handle.clone();
     let mut guard = ping_check_handle_arc.lock().await;
@@ -122,10 +121,10 @@ async fn stop_check_connection(ctx: Context<'_>) -> Result<(), Error> {
     prefix_command,
     slash_command
 )]
-/// Shows current time in metric (decimal) format (UTC+2 by default, specify offset in hours)
+/// Shows current time in metric (decimal) format (UTC+1 by default, to change specify offset in hours)
 async fn metric_time(ctx: Context<'_>, utc_offset:Option<i32>
 ) -> Result<(), Error> {
-    let utc_offset = utc_offset.unwrap_or(2);
+    let utc_offset = utc_offset.unwrap_or(1);
     let mut utc_offset_string = format!("+{}", utc_offset);
     if utc_offset<0{
         utc_offset_string = format!("-{}", utc_offset);
@@ -151,12 +150,12 @@ async fn secure_command(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Live metric (decimal) clock that updates every metric minute
+/// Live metric (decimal) clock that updates every metric minute (UTC+1 by default)
 #[poise::command(prefix_command, slash_command)]
 async fn metric_clock(
     ctx: Context<'_>, utc_offset: Option<i32>
 ) -> Result<(), Error> {
-    let utc_offset = utc_offset.unwrap_or(2);
+    let utc_offset = utc_offset.unwrap_or(1);
     if utc_offset < -12 || utc_offset > 14 {
         ctx.say("Please provide a valid UTC offset between -12 and +14.").await?;
         return Ok(());
@@ -203,10 +202,10 @@ async fn metric_clock(
                 let mut minute_str = current_metric_minute.to_string();
                 let mut hour_str = current_metric_hour.to_string();
 
-                if current_metric_minute < 9 {
+                if current_metric_minute <= 9 {
                     minute_str = format!("0{}", current_metric_minute);
                 }
-                if current_metric_hour < 9 {
+                if current_metric_hour <= 9 {
                     hour_str = format!("0{}", current_metric_hour);
                 }
                 last_metric_second = current_metric_second;
@@ -253,7 +252,7 @@ async fn stop_metric_clock(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Live clock that updates every minute for each timezone
+///Live clock for a given timezone ((IANA format e.g., "Europe/Berlin", "America/New_York")
 #[poise::command(prefix_command, slash_command)]
 async fn clock(
     ctx: Context<'_>, timezone_name: Option<String>
@@ -344,7 +343,7 @@ async fn stop_clock(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Shows current time in a given time zone (e.g., "Europe/Berlin", "America/New_York")
+/// Shows current time in a given time zone (IANA format e.g., "Europe/Berlin", "America/New_York")
 #[poise::command(prefix_command, slash_command)]
 async fn get_time(ctx: Context<'_>, timezone_name:Option<String>
 ) -> Result<(), Error> {
@@ -357,26 +356,26 @@ async fn get_time(ctx: Context<'_>, timezone_name:Option<String>
             return Ok(());
         }
     };
-    let datetime_utc: DateTime<Utc> = Utc::now();
-    let datetime_tz = datetime_utc.with_timezone(&timezone);
-
-    let content = format!("Current Time at {} ({}) is: {}",
-                              timezone_name,
-                              metric_clock::get_utc_offset(&timezone),
-                              datetime_utc.format("%H:%M").to_string());
+    let mut time_now = Utc::now().with_timezone(&timezone);
+    let mut time_now = Utc::now().with_timezone(&timezone);
+    let content = format!("\nCurrent Time in {} ({}) is: {} {}",
+                          timezone_name,
+                          metric_clock::get_utc_offset(&timezone),
+                          time_now.format("%H:%M").to_string(),
+                          timezone.offset_from_utc_datetime(&Utc::now().naive_utc()));
     ctx.say(content).await?;
     Ok(())
 }
 
-
 /// Live clock that for each timezone in list (format: Europe/Berlin,America/New_York,...)
 #[poise::command(prefix_command, slash_command)]
 async fn timezone_clock(
-    ctx: Context<'_>, timezone_name_list: Option<String>
+    ctx: Context<'_>, timezone_name_list: Option<String>,restart_msg_id: Option<String>,
 ) -> Result<(), Error> {
     let timezone_names = timezone_name_list.unwrap_or("Europe/Berlin".to_string());
     let timezone_vec: Vec<String> = timezone_names.split(',').map(|s| s.trim().to_string()).collect();
     let mut content = "Current Time at timezones:".to_string();
+    let msg_id = restart_msg_id.unwrap_or("".to_string());
 
     for timezone_name_str in timezone_vec.clone() {
         // Parse the timezone name
@@ -512,14 +511,16 @@ fn get_token() -> String {
 
 
 #[tokio::main]
-async fn main() {
-    // bot token from file
-    let token = get_token();
-
+async fn main() -> Result<(), Error> {
+    // Read bot token locally from BOT_TOKEN.txt
+    //let token = get_token().trim().to_string();
+    let token = env::var("DISCORD_TOKEN")
+        .or_else(|_| fs::read_to_string("BOT_TOKEN.txt"))
+        .expect("Could not find DISCORD_TOKEN env var or BOT_TOKEN.txt file");
     // permissions the bot will request
-    let intents = serenity::GatewayIntents::GUILD_MESSAGES |
-        serenity::GatewayIntents::MESSAGE_CONTENT |
-        serenity::GatewayIntents::non_privileged();
+    let intents = serenity::GatewayIntents::GUILD_MESSAGES
+        | serenity::GatewayIntents::MESSAGE_CONTENT
+        | serenity::GatewayIntents::non_privileged();
 
     println!("Loading bot...");
     let framework = poise::Framework::builder()
@@ -538,7 +539,7 @@ async fn main() {
                 get_time(),
                 timezone_clock(),
                 stop_timezone_clock(),
-            ], // Add your commands to this vector.
+            ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
                 case_insensitive_commands: false,
@@ -548,7 +549,6 @@ async fn main() {
         })
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
-                // This registers your application commands globally, making slash commands available.
                 match poise::builtins::register_globally(ctx, &framework.options().commands).await {
                     Ok(_) => println!("✅ Successfully registered slash commands, ready to go!"),
                     Err(e) => println!("❌ Failed to register commands: {}", e),
@@ -557,16 +557,19 @@ async fn main() {
                     ping_check_handle: Arc::new(Mutex::new(None)),
                     clock_handle: Arc::new(Mutex::new(None)),
                     metric_clock_handle: Arc::new(Mutex::new(None)),
-                    timezone_clock_handle: Arc::new(Mutex::new(None))
+                    timezone_clock_handle: Arc::new(Mutex::new(None)),
                 })
             })
         })
         .build();
-
     // Create a new instance of the Client, logging in as a bot.
 
-    let client = serenity::ClientBuilder::new(token, intents)
+    let mut client = serenity::ClientBuilder::new(token, intents)
         .framework(framework)
-        .await;
-    client.unwrap().start().await.unwrap();
+        .await
+        .expect("Error creating client");
+
+    // Start the client locally
+    client.start().await.map_err(|e| Box::new(e) as Error)?;
+    Ok(())
 }
