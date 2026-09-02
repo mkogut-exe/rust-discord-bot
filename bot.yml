@@ -1,0 +1,4 @@
+services:
+  bot:
+    image: mkogut/ruts_discord_bot:latest
+    restart: always

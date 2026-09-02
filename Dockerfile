@@ -1,7 +1,7 @@
 # ---------------------------------------------------
 # 1. Build Stage
 # ---------------------------------------------------
-FROM rust:latest as builder
+FROM rust:latest AS builder
 
 # Create a new empty shell project
 WORKDIR /usr/src/app
@@ -11,7 +11,7 @@ COPY . .
 
 # Build and install the application
 # This compiles the binary and moves it to /usr/local/cargo/bin/
-RUN cargo install --path . --jobs 1
+RUN cargo install --path .
 
 # ---------------------------------------------------
 # 2. Runtime Stage
@@ -28,13 +28,13 @@ WORKDIR /app
 
 # Copy the compiled binary from the builder stage
 # We rename it to 'discord-bot' explicitly so CMD is easy to write
-COPY --from=builder /usr/local/cargo/bin/* /app/discord-bot
+COPY --from=builder /usr/local/cargo/bin/ /app/
 
 # Handle the BOT_TOKEN.txt file
 # OPTION A: If BOT_TOKEN.txt is in your git repo, this copies it.
-# OPTION B: If it is ignored (good practice), you must ensure your deployment platform 
+# OPTION B: If it is ignored (good practice), you must ensure your deployment platform
 #           mounts this file or you create it using a script.
 COPY --from=builder /usr/src/app/BOT_TOKEN.txt* /app/
 
 # Set the startup command
-CMD ["./discord-bot"]
+CMD ["sh", "-c", "env -u RUSTUP_TOOLCHAIN ./*"]

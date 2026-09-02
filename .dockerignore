@@ -1,0 +1,9 @@
+# Ignore the build artifacts generated locally
+target/
+
+# Ignore version control
+.git/
+
+# Ignore the token file to prevent it from being copied into the image
+# This solves the issue of the shell trying to execute the text file
+BOT_TOKEN.txt
